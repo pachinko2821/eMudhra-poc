@@ -1,0 +1,62 @@
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: test-nginx-ssl
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      - CA_NAME=${CA_NAME:-EM_DV_TLS_CA_-_G3B_cross}
+      - DOMAIN=${DOMAIN:-google.com}
+      - DAYS=${DAYS:-365}
+    volumes:
+      - ./pem:/ca/pem:ro
+      - ./private:/ca/private:ro
+      - ./certs:/etc/nginx/certs
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+
+  test-python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: test-python-client
+    depends_on:
+      - nginx
+    environment:
+      - DOMAIN=${DOMAIN:-google.com}
+    volumes:
+      - ./clients/pythonClient.py:/pythonClient.py:ro
+    command:
+      - "sh"
+      - "-c"
+      - |
+        NGINX_IP=$$(getent hosts nginx | awk '{ print $$1 }')
+        echo "$$NGINX_IP $${DOMAIN:-google.com}" >> /etc/hosts
+        echo "[Setup] Added /etc/hosts entry: $$NGINX_IP $${DOMAIN:-google.com}"
+        sleep 2
+        python /pythonClient.py
+
+  test-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: test-node-client
+    depends_on:
+      - nginx
+    environment:
+      - DOMAIN=${DOMAIN:-google.com}
+    volumes:
+      - ./clients/nodeClient.js:/app/nodeClient.js:ro
+    command:
+      - "sh"
+      - "-c"
+      - |
+        NGINX_IP=$$(getent hosts nginx | awk '{ print $$1 }')
+        echo "$$NGINX_IP $${DOMAIN:-google.com}" >> /etc/hosts
+        echo "[Setup] Added /etc/hosts entry: $$NGINX_IP $${DOMAIN:-google.com}"
+        sleep 2
+        node /app/nodeClient.js
