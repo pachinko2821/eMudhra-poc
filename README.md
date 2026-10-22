@@ -56,6 +56,55 @@ Both clients:
 
 ---
 
+## Root CA Strategies Implemented
+
+`docker-entrypoint.sh` supports the `ROOT_TYPE` environment variable matching the two cross-signed domain paths seen on `we-have-a-problem.com`:
+
+| Mode (`ROOT_TYPE`) | Matches Domain | Root CA Anchor in Trust Store | Chain Structure Sent by Nginx |
+| :--- | :--- | :--- | :--- |
+| `emudhra` (Default) | `https://dv-g3b-emudhra.we-have-a-problem.com/` | `emSign ECC Root CA - G3` | Leaf → `EM_DV_TLS_CA_-_G3B` → `emSign Root TLS CA - G3` (cross-cert) → `emSign ECC Root CA - G3` |
+| `aaa` | `https://dv-g3b-aaa-emudhra.we-have-a-problem.com/` | `AAA Certificate Services` | Leaf → `EM_DV_TLS_CA_-_G3B` (cross-signed by AAA) → `AAA Certificate Services` |
+
+---
+
+## Verification Results
+
+### 1. With `ROOT_TYPE=emudhra` (Default)
+
+```bash
+docker compose up test-python test-node
+```
+
+```text
+test-node-client    | Requesting: https://dv-g3b-emudhra.we-have-a-problem.com/ -> Status: 200
+test-node-client    | Testing local Nginx connection to https://google.com/...
+test-node-client    | SUCCESS! Node.js axios verified certificate for https://google.com/. Status: 200. Text: fake google.com
+test-python-client  | Requesting: https://dv-g3b-emudhra.we-have-a-problem.com/ -> Status: 200
+test-python-client  | Testing local Nginx connection to https://google.com/...
+test-python-client  | SUCCESS! Python requests verified certificate for https://google.com/. Status: 200. Text: fake google.com
+```
+
+### 2. With `ROOT_TYPE=aaa`
+
+```bash
+ROOT_TYPE=aaa docker compose up -d --force-recreate nginx
+docker compose up test-python test-node
+```
+
+- **Node.js Client**: :white_check_mark: **SUCCESS** (Status: 200) — Node 16's built-in store still trusts `AAA Certificate Services`.
+- **Python Client**: :x: **FAILS** with `SSLError: unable to get local issuer certificate` — exactly mirroring the real-world failure on `dv-g3b-aaa-emudhra.we-have-a-problem.com` because `certifi==2026.7.22` deprecates `AAA Certificate Services`.
+
+### Verification Matrix
+
+| Target / Server Mode | Root CA in Trust Chain | Node.js (`node:16` / axios) | Python (`certifi==2026.7.22` / requests) |
+| :--- | :--- | :--- | :--- |
+| `emudhra` cross-sign<br>(or `https://dv-g3b-emudhra...`) | `emSign ECC Root CA - G3` | :white_check_mark: SUCCESS (200) | :white_check_mark: SUCCESS (200) |
+| `aaa` cross-sign<br>(or `https://dv-g3b-aaa-emudhra...`) | `AAA Certificate Services` | :white_check_mark: SUCCESS (200) | :x: FAILS (`SSLError`) |
+
+> **Key Takeaway**: Node.js connects successfully with both cross-signed variants (`emudhra` and `aaa`), whereas Python connects with the `emudhra` cross-sign but fails on the `aaa` cross-sign.
+
+---
+
 ## Brute-Force Key Recovery
 
 ```bash
@@ -73,10 +122,11 @@ For each `.pem` certificate in `pem/`:
 
 ## Configuration
 
-The issuing CA and target domain are set in [`.env`](.env):
+The issuing CA, root trust strategy, and target domain are set in [`.env`](.env):
 
 ```ini
 CA_NAME=EM_DV_TLS_CA_-_G3B
+ROOT_TYPE=emudhra
 DOMAIN=google.com
 DAYS=365
 HTTP_PORT=80
@@ -86,9 +136,18 @@ HTTPS_PORT=443
 Or override via environment:
 
 ```bash
-CA_NAME=EM_OV_TLS_CA_-_G3C_cross DOMAIN=this-is-a-test.com docker compose up -d nginx
+ROOT_TYPE=aaa CA_NAME=EM_DV_TLS_CA_-_G3B DOMAIN=google.com docker compose up -d --force-recreate nginx
 docker compose up test-python test-node
 ```
+
+### Configuration Options
+
+- `CA_NAME`: The intermediate CA to use for signing (e.g., `EM_DV_TLS_CA_-_G3B`).
+- `ROOT_TYPE`: Trust chain and cross-signing mode:
+  - `emudhra` (default): Chains to `emSign ECC Root CA - G3` via intermediate cross-cert (mirrors `https://dv-g3b-emudhra.we-have-a-problem.com/`).
+  - `aaa`: Chains to `AAA Certificate Services` (mirrors `https://dv-g3b-aaa-emudhra.we-have-a-problem.com/`).
+- `DOMAIN`: Target domain for the forged leaf certificate (default: `google.com`).
+- `DAYS`: Certificate validity period in days (default: `365`).
 
 ### Available CAs
 

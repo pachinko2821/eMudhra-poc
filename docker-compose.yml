@@ -9,7 +9,8 @@ services:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
     environment:
-      - CA_NAME=${CA_NAME:-EM_DV_TLS_CA_-_G3B_cross}
+      - CA_NAME=${CA_NAME:-EM_DV_TLS_CA_-_G3B}
+      - ROOT_TYPE=${ROOT_TYPE:-emudhra}
       - DOMAIN=${DOMAIN:-google.com}
       - DAYS=${DAYS:-365}
     volumes:
